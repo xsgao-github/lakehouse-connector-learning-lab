@@ -1,0 +1,32 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versions
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+metadata.json
+
+# Minio volume
+minio_data/
