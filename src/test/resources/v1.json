@@ -1,0 +1,27 @@
+{
+  "format-version": 1,
+  "table-uuid": "c7324838-812d-4d7a-8f6b-73b9e4a2d810",
+  "location": "s3://warehouse/tables/orders",
+  "schema": {
+    "schema-id": 1,
+    "fields": [
+      {"id": 1, "name": "order_id", "type": "long", "required": true},
+      {"id": 2, "name": "amount", "type": "double", "required": false},
+      {"id": 3, "name": "dt", "type": "string", "required": true}
+    ]
+  },
+  "current-snapshot-id": 1001,
+  "snapshots": [
+    {
+      "snapshot-id": 1001,
+      "timestamp-ms": 1730640000000,
+      "added-files": [
+        {
+          "file-path": "data/dt=2026-11-03/part-001.parquet",
+          "record-count": 1500,
+          "file-size-in-bytes": 45021
+        }
+      ]
+    }
+  ]
+}

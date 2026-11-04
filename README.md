@@ -74,7 +74,7 @@ warehouse/
 This project is organized as a series of modules. Each module introduces a new Lakehouse concept, implements it in code, and documents the findings. Modules may depends on previous modules, so you need to follow the sequence bellow.
 
 - [x] **Module 0**: Getting Started (Baseline) -> [docs/module-00-setup.md](docs/module-00-setup.md)
-- [ ] **Module 1**: Storage-Centric Catalog & Schema Evolution -> [docs/module-01.md](docs/module-01.md) (Tracks table state via versioned JSON metadata files directly on object storage)
+- [x] **Module 1**: Storage-Centric Catalog & Schema Evolution -> [docs/module-01-schema-discovery.md](docs/module-01-schema-discovery.md) (Tracks table state via versioned JSON metadata files directly on object storage)
 - [ ] **Module 2**: Optimistic Concurrency Control (OCC) & WAP Commits -> [docs/module-02.md](docs/module-02.md) (Prevents race conditions using staging prefixes and atomic retry loops)
 - [ ] **Module 3**: Split Generation & Partition Pruning -> [docs/module-03.md](docs/module-03.md) (Evaluates filter predicates against partition folder paths to skip irrelevant data)
 - [ ] **Module 4**: Columnar Projection & Predicate Pushdown -> [docs/module-04.md](docs/module-04.md) (Reads only requested columns and pushes down filtering logic)
