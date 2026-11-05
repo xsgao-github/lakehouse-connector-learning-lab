@@ -77,6 +77,6 @@ This project is organized as a series of modules. Each module introduces a new L
 - [x] **Module 1**: Storage-Centric Catalog & Schema Evolution -> [docs/module-01-schema-discovery.md](docs/module-01-schema-discovery.md) (Tracks table state via versioned JSON metadata files directly on object storage)
 - [x] **Module 2**: Optimistic Concurrency Control (OCC) & WAP Commits -> [docs/module-02-OCC-and-WAP.md](docs/module-02-OCC-and-WAP.md) (Prevents race conditions using staging prefixes and atomic retry loops)
 - [x] **Module 3**: Metadata Pruning -> [docs/module-03-prun.md](docs/module-03-prun.md) (Evaluates partition filters and column statistics bounds to skip irrelevant data files)
-- [ ] **Module 4**: File Splitting & Parallel Scan Planning -> [docs/module-04-splitting.md](docs/module-04-splitting.md) (Breaks down data files into execution splits for parallel workers)
+- [x] **Module 4**: File Splitting & Parallel Scan Planning -> [docs/module-04-split-and-parallel-scan.md](docs/module-04-split-and-parallel-scan.md) (Breaks down data files into execution splits for parallel workers)
 - [ ] **Module 5**: Columnar Projection & Predicate Pushdown -> [docs/module-05.md](docs/module-05.md) (Reads only requested columns and pushes down filtering logic)
 - [ ] **Module 6**: Robust Error Handling & S3 Idempotency -> [docs/module-06.md](docs/module-06.md) (Handles transient network failures, stale conflicts, and bulletproof recovery)
