@@ -8,18 +8,27 @@ import xsgao.lakehouseconnector.catalog.TableMetadata;
 import xsgao.lakehouseconnector.planner.QueryPredicate;
 import xsgao.lakehouseconnector.planner.SplitPlanner;
 import xsgao.lakehouseconnector.planner.TableSplit;
+import xsgao.lakehouseconnector.scan.ScanResult;
+import xsgao.lakehouseconnector.scan.TableScanExecutor;
 
 /**
- * Orchestrates the read path: loads table metadata from the catalog control plane
- * and executes partition and column-statistics pruning via SplitPlanner.
+ * Orchestrates the read path: loads table metadata from the catalog control plane,
+ * executes partition and column-statistics pruning via SplitPlanner, and executes
+ * table scans concurrently via TableScanExecutor.
  */
 public class TableReaderService {
     private final CatalogService catalogService;
     private final SplitPlanner splitPlanner;
+    private final TableScanExecutor scanExecutor;
 
     public TableReaderService(S3Client s3Client, String bucketName) {
+        this(s3Client, bucketName, Runtime.getRuntime().availableProcessors());
+    }
+
+    public TableReaderService(S3Client s3Client, String bucketName, int maxThreads) {
         this.catalogService = new CatalogService(s3Client, bucketName);
         this.splitPlanner = new SplitPlanner();
+        this.scanExecutor = new TableScanExecutor(maxThreads);
     }
 
     /**
@@ -45,7 +54,7 @@ public class TableReaderService {
 
     /**
      * Supports Time-Travel auditing: plans query execution splits against 
-2     * a specific historical metadata version (e.g., v1.json or v2.json).
+     * a specific historical metadata version (e.g., v1.json or v2.json).
      * 
      * @param tableName       The name of the table
      * @param version         The target version number to query against
@@ -64,5 +73,26 @@ public class TableReaderService {
 
         // 2. Generate and prune splits
         return splitPlanner.planSplits(metadata, partitionFilter, predicates);
+    }
+
+    /**
+     * End-to-end read execution: plans the scan using pruning and executes 
+     * the resulting splits concurrently across worker threads.
+     * 
+     * @param tableName       The name of the table
+     * @param partitionFilter Optional partition prefix filter
+     * @param predicates      List of query predicates
+     * @return List of execution results from all scanned splits
+     */
+    public List<ScanResult> executeScan(
+            String tableName, 
+            String partitionFilter, 
+            List<QueryPredicate> predicates) throws Exception {
+        
+        // 1. Plan and prune splits
+        List<TableSplit> splits = planScan(tableName, partitionFilter, predicates);
+
+        // 2. Execute concurrently via data plane executor
+        return scanExecutor.execute(splits);
     }
 }
