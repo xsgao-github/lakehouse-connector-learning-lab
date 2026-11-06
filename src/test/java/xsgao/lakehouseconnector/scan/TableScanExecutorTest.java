@@ -1,15 +1,15 @@
 package xsgao.lakehouseconnector.scan;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import xsgao.lakehouseconnector.planner.TableSplit;
+import static xsgao.lakehouseconnector.utils.S3ClientUtils.BUCKET_NAME;
 
 /**
  * Unit tests for TableScanExecutor verifying concurrent task execution,
@@ -19,20 +19,20 @@ class TableScanExecutorTest {
 
     @Test
     void testExecuteWithMultipleSplits() throws Exception {
-        TableSplit split1 = new TableSplit("s3://lakehouse-bucket/data/dt=2026-11-04/file1.parquet", 100L, 2048L, 1L);
-        TableSplit split2 = new TableSplit("s3://lakehouse-bucket/data/dt=2026-11-04/file2.parquet", 250L, 4096L, 1L);
-        
+        TableSplit split1 = new TableSplit("s3://" + BUCKET_NAME + "/data/dt=2026-11-04/file1.parquet", 100L, 2048L, 1L);
+        TableSplit split2 = new TableSplit("s3://" + BUCKET_NAME + "/data/dt=2026-11-04/file2.parquet", 250L, 4096L, 1L);
+
         TableScanExecutor executor = new TableScanExecutor(2);
         List<ScanResult> results = executor.execute(Arrays.asList(split1, split2));
 
         assertEquals(2, results.size(), "Should return a ScanResult for every input TableSplit");
         
         boolean found1 = results.stream().anyMatch(r -> 
-            r.getFilePath().equals("s3://lakehouse-bucket/data/dt=2026-11-04/file1.parquet") && 
+            r.getFilePath().equals("s3://" + BUCKET_NAME + "/data/dt=2026-11-04/file1.parquet") && 
             r.getRecordCount() == 100L
         );
         boolean found2 = results.stream().anyMatch(r -> 
-            r.getFilePath().equals("s3://lakehouse-bucket/data/dt=2026-11-04/file2.parquet") && 
+            r.getFilePath().equals("s3://" + BUCKET_NAME + "/data/dt=2026-11-04/file2.parquet") && 
             r.getRecordCount() == 250L
         );
         

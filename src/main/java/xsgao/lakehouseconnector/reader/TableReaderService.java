@@ -1,6 +1,11 @@
 package xsgao.lakehouseconnector.reader;
 
 import java.util.List;
+import xsgao.lakehouseconnector.model.RecordBatch;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.ArrayList;
+import xsgao.lakehouseconnector.catalog.Schema;
 
 import software.amazon.awssdk.services.s3.S3Client;
 import xsgao.lakehouseconnector.catalog.CatalogService;
@@ -20,12 +25,14 @@ public class TableReaderService {
     private final CatalogService catalogService;
     private final SplitPlanner splitPlanner;
     private final TableScanExecutor scanExecutor;
+    private final S3Client s3Client;
 
     public TableReaderService(S3Client s3Client, String bucketName) {
-        this(s3Client, bucketName, Runtime.getRuntime().availableProcessors());
+        this(s3Client, bucketName, 3);
     }
 
     public TableReaderService(S3Client s3Client, String bucketName, int maxThreads) {
+        this.s3Client = s3Client;
         this.catalogService = new CatalogService(s3Client, bucketName);
         this.splitPlanner = new SplitPlanner();
         this.scanExecutor = new TableScanExecutor(maxThreads);
@@ -95,4 +102,31 @@ public class TableReaderService {
         // 2. Execute concurrently via data plane executor
         return scanExecutor.execute(splits);
     }
+        
+    public Iterator<RecordBatch> readSplit(
+            TableSplit split,
+            Schema schema,
+            List<String> projectedColumns) {
+        try {
+            xsgao.lakehouseconnector.parquet.ParquetTableReader parquetReader =
+                new xsgao.lakehouseconnector.parquet.ParquetTableReader(
+                    schema,
+                    new org.apache.hadoop.fs.Path("s3a://" + this.catalogService.getBucketName() + "/" + split.getFilePath()),
+                    this.s3Client
+                );
+
+            List<RecordBatch> batches = new java.util.ArrayList<>();
+            RecordBatch batch = new RecordBatch(schema.getFields());
+            Map<String, Object> record;
+            while ((record = parquetReader.readNextRecord()) != null) {
+                batch.addRow(new xsgao.lakehouseconnector.model.Row(record));
+            }
+            batches.add(batch);
+            parquetReader.close();
+            return batches.iterator();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 }
