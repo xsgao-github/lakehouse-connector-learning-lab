@@ -8,6 +8,10 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 
 public class S3ClientFactory {
+
+    public static final String MINIO_ACCESS_KEY = "admin";
+    public static final String MINIO_SECRET_KEY = "password123";
+
     public static S3Client createMinIoClient(String endpointOverride) {
         return S3Client.builder()
                 .endpointOverride(URI.create(endpointOverride)) //Only required for testing with MinIO, as it does not use standard AWS endpoints

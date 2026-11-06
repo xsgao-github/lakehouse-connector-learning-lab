@@ -23,7 +23,7 @@ public class TableReaderService {
     private final ScanExecutor scanExecutor;
 
     public TableReaderService(S3Client s3Client, String bucketName) {
-        this(s3Client, bucketName, Runtime.getRuntime().availableProcessors());
+        this(s3Client, bucketName, 3);
     }
 
     public TableReaderService(S3Client s3Client, String bucketName, int maxThreads) {

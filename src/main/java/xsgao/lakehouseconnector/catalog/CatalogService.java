@@ -208,4 +208,8 @@ public class CatalogService {
     private static String buildVersionedMetadataKey(String tableName, int version) {
         return String.format("%s/v%d.json", buildMetadataPrefix(tableName), version);
     }
+
+    public String getBucketName() {
+        return bucketName;
+    }
 }
