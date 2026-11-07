@@ -1,15 +1,17 @@
 package xsgao.lakehouseconnector.reader;
 
 import java.util.List;
+import java.util.ArrayList;
 import xsgao.lakehouseconnector.model.RecordBatch;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.ArrayList;
 import xsgao.lakehouseconnector.catalog.Schema;
 
 import software.amazon.awssdk.services.s3.S3Client;
 import xsgao.lakehouseconnector.catalog.CatalogService;
 import xsgao.lakehouseconnector.catalog.TableMetadata;
+import xsgao.lakehouseconnector.model.Row;
+import xsgao.lakehouseconnector.parquet.ParquetTableReader;
 import xsgao.lakehouseconnector.planner.QueryPredicate;
 import xsgao.lakehouseconnector.planner.SplitPlanner;
 import xsgao.lakehouseconnector.planner.TableSplit;
@@ -108,18 +110,19 @@ public class TableReaderService {
             Schema schema,
             List<String> projectedColumns) {
         try {
-            xsgao.lakehouseconnector.parquet.ParquetTableReader parquetReader =
-                new xsgao.lakehouseconnector.parquet.ParquetTableReader(
+            ParquetTableReader parquetReader =
+                new ParquetTableReader(
                     schema,
+                    projectedColumns,
                     new org.apache.hadoop.fs.Path("s3a://" + this.catalogService.getBucketName() + "/" + split.getFilePath()),
                     this.s3Client
                 );
 
-            List<RecordBatch> batches = new java.util.ArrayList<>();
+            List<RecordBatch> batches = new ArrayList<>();
             RecordBatch batch = new RecordBatch(schema.getFields());
             Map<String, Object> record;
             while ((record = parquetReader.readNextRecord()) != null) {
-                batch.addRow(new xsgao.lakehouseconnector.model.Row(record));
+                batch.addRow(new Row(record));
             }
             batches.add(batch);
             parquetReader.close();

@@ -20,15 +20,13 @@ public class ProjectedScanReader implements Iterator<RecordBatch> {
 
     public ProjectedScanReader(
         TableSplit split,
+        Schema tableSchema,
         List<String> columnNames,
         QueryPredicate predicate,
-        Schema tableSchema,
         TableReaderService tableReaderService
     ) {
-        this.predicate = predicate;
-        
-        // Validate or project schema against the catalog schema if needed
         fields = projectColumns(tableSchema, columnNames);
+        this.predicate = predicate;
         
         // Delegate low-level scan and columnar projection to TableReaderService
         underlyingIterator = tableReaderService.readSplit(split, tableSchema, columnNames);
@@ -63,10 +61,11 @@ public class ProjectedScanReader implements Iterator<RecordBatch> {
 
     private RecordBatch filterBatchRowByRow(RecordBatch batch) {
         RecordBatch filteredBatch = new RecordBatch(fields);
-        
+
         for (int i = 0; i < batch.getRowCount(); i++) {
             Row row = batch.getRow(i);
-            // Evaluate QueryPredicate row-by-row at the edge
+            // If a predicate is defined, we must ensure the row has the required column
+            // before evaluating. If the row is missing the column, it's filtered out.
             if (predicate == null || predicate.evaluate(row)) {
                 filteredBatch.addRow(row);
             }
