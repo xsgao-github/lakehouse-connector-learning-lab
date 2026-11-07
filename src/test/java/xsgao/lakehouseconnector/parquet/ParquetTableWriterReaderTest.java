@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +42,14 @@ public class ParquetTableWriterReaderTest {
         tableName = "parquet_table_writer_reader_test_" + System.currentTimeMillis();
     }
 
+    @AfterEach
+    void tearDown() {
+        if ("true".equals(System.getProperty("keepData"))) {
+            return;
+        }
+        S3ClientUtils.deleteTable(s3Client, BUCKET_NAME, tableName);
+    }
+
     @Test
     public void testStreamingRoundTripAndStatsFallback() throws IOException {
         Schema schema = new Schema(1, Arrays.asList(
@@ -63,7 +73,7 @@ public class ParquetTableWriterReaderTest {
         }
 
         // 2. Read records back
-        try (ParquetTableReader reader = new ParquetTableReader(schema, parquetPath, s3Client)) {
+        try (ParquetTableReader reader = new ParquetTableReader(schema, null, parquetPath, s3Client)) {
             Map<String, Object> rec1 = reader.readNextRecord();
             assertNotNull(rec1);
             assertEquals(101, rec1.get("id"));
@@ -78,7 +88,7 @@ public class ParquetTableWriterReaderTest {
         }
 
         // 3. Validate Footer Statistics Fallback
-        try (ParquetTableReader reader = new ParquetTableReader(schema, parquetPath, s3Client)) {
+        try (ParquetTableReader reader = new ParquetTableReader(schema, null, parquetPath, s3Client)) {
             Map<String, ColumnStats> statsMap = reader.extractFooterStatistics(parquetPath);
             assertNotNull(statsMap);
             assertTrue(statsMap.containsKey("id"));

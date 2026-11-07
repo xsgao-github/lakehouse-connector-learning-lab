@@ -17,6 +17,8 @@ import org.apache.parquet.hadoop.example.GroupReadSupport;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.Type;
 
 import software.amazon.awssdk.services.s3.S3Client;
 import xsgao.lakehouseconnector.catalog.ColumnStats;
@@ -45,8 +47,7 @@ public class ParquetTableReader implements RowReader {
         this.s3Client = s3Client;
         this.conf = new Configuration();
         
-        Configuration conf = new Configuration();
-        conf.set("fs.s3a.path.style.access", "true"); // Set to true for MinIO and some S3-compatible services
+        conf.set("fs.s3a.path.style.access", "true");
         conf.set("fs.s3a.connection.ssl.enabled", "false");
         conf.set("fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider");
         conf.set("fs.s3a.access.key", MINIO_ACCESS_KEY);
@@ -93,6 +94,13 @@ public class ParquetTableReader implements RowReader {
     @Override
     public Map<String, Object> readNextRecord() throws IOException {
         Group group = reader.read();
+
+        if (group != null) {
+            // This returns the exact number of columns loaded by the physical Parquet reader
+            int physicalColumnCount = group.getType().getFieldCount();
+            LOGGER.info("**** [PARQUET READ] Read record with " + physicalColumnCount + " physical columns from Parquet file. *****");
+        }
+
         if (group == null) {
             return null;
         }
@@ -101,7 +109,6 @@ public class ParquetTableReader implements RowReader {
         for (Field field : projectedSchema.getFields()) {
             String colName = field.getName();
             try {
-                // Check if field exists in this specific group instance
                 int fieldIndex = group.getType().getFieldIndex(colName);
                 if (fieldIndex >= 0 && group.getFieldRepetitionCount(fieldIndex) > 0) {
                     Object val = extractValueFromGroup(group, colName, field.getType());
@@ -115,6 +122,7 @@ public class ParquetTableReader implements RowReader {
         }
         return record;
     }
+
     public Map<String, ColumnStats> extractFooterStatistics(Path path) throws IOException {
         ParquetMetadata metadata = ParquetFileReader.readFooter(conf, path, ParquetMetadataConverter.NO_FILTER);
         Map<String, ColumnStats> statsMap = new HashMap<>();
@@ -150,12 +158,7 @@ public class ParquetTableReader implements RowReader {
         if (typeStr == null) return group.getString(colName, 0);
 
         switch (typeStr.toLowerCase().trim()) {
-            case "int": case "integer": case "int32":
-                try {
-                    return group.getInteger(colName, 0);
-                } catch (ClassCastException e) {
-                    return (int) group.getLong(colName, 0);
-                }
+            case "int": case "integer": case "int32": return group.getInteger(colName, 0);
             case "long": case "bigint": case "int64": case "date": return group.getLong(colName, 0);
             case "float": return group.getFloat(colName, 0);
             case "double": case "decimal": return group.getDouble(colName, 0);
