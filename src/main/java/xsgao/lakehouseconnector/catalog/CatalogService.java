@@ -8,13 +8,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
-import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.Delete;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Object;
+import xsgao.lakehouseconnector.utils.S3RetryExecutor;
 
 /**
  * Service for managing table metadata with storage-centric design.
@@ -33,18 +41,23 @@ public class CatalogService {
 
     private final S3Client s3Client;
     private final String bucketName;
-    
+    private final S3RetryExecutor s3RetryExecutor;
+
     public CatalogService(S3Client s3Client, String bucketName) {
         this.s3Client = s3Client;
         this.bucketName = bucketName;
+        this.s3RetryExecutor = new S3RetryExecutor();
     }
 
     /**
-     * Checks if a table exists in the catalog by verifying the presence of any metadata version in S3.
+     * Checks if a table exists in the catalog by verifying the presence of any
+     * metadata version in S3.
+     * 
      * @param tableName the name of the table to check
      * @return true if the table exists, false otherwise
+     * @throws Exception
      */
-    public boolean isTableExists(String tableName) {
+    public boolean isTableExists(String tableName) throws Exception {
         String prefix = buildMetadataPrefix(tableName);
         try {
             ListObjectsV2Request request = ListObjectsV2Request.builder()
@@ -52,7 +65,8 @@ public class CatalogService {
                     .prefix(prefix + "/v")
                     .maxKeys(1)
                     .build();
-            ListObjectsV2Response response = s3Client.listObjectsV2(request);
+            ListObjectsV2Response response = s3RetryExecutor.execute(() -> s3Client.listObjectsV2(request),
+                    "S3-ListObjectsV2" + prefix + "/v");
             return response.contents() != null && !response.contents().isEmpty();
         } catch (AwsServiceException | SdkClientException e) {
             return false;
@@ -60,7 +74,9 @@ public class CatalogService {
     }
 
     /**
-     * Loads the latest table metadata from S3 by discovering the highest vN.json version.
+     * Loads the latest table metadata from S3 by discovering the highest vN.json
+     * version.
+     * 
      * @param tableName the name of the table whose metadata is to be loaded
      * @return the TableMetadata object representing the table's latest metadata
      * @throws Exception if an error occurs while loading the metadata
@@ -75,28 +91,36 @@ public class CatalogService {
 
     /**
      * Loads a specific version of the table metadata from S3.
+     * 
      * @param tableName the name of the table
-     * @param version the specific metadata version number (e.g., 1 for v1.json)
+     * @param version   the specific metadata version number (e.g., 1 for v1.json)
      * @return the TableMetadata object
      * @throws Exception if an error occurs while loading
      */
     public TableMetadata loadTableMetadata(String tableName, int version) throws Exception {
         String key = buildVersionedMetadataKey(tableName, version);
-        ResponseBytes<software.amazon.awssdk.services.s3.model.GetObjectResponse> response = s3Client.getObject(
+        
+        ResponseBytes<GetObjectResponse> response = s3RetryExecutor.execute(() -> 
+            s3Client.getObject(
                 GetObjectRequest.builder()
                         .bucket(bucketName)
                         .key(key)
                         .build(),
-                software.amazon.awssdk.core.sync.ResponseTransformer.toBytes());
-
+                ResponseTransformer.toBytes()
+            ), 
+            "S3-GetObject-" + key
+        );
+        
         byte[] jsonBytes = response.asByteArray();
         return TableMetadata.fromJson(new String(jsonBytes, StandardCharsets.UTF_8));
     }
 
     /**
-     * Automatically determines the next version number and saves the metadata as vN.json.
+     * Automatically determines the next version number and saves the metadata as
+     * vN.json.
+     * 
      * @param tableName the name of the table whose metadata is to be saved
-     * @param metadata the TableMetadata object representing the table's metadata
+     * @param metadata  the TableMetadata object representing the table's metadata
      * @return the version number (N) of the saved metadata
      * @throws Exception if an error occurs while saving the metadata
      */
@@ -106,13 +130,16 @@ public class CatalogService {
         String jsonContent = metadata.toJson();
         byte[] jsonBytes = jsonContent.getBytes(StandardCharsets.UTF_8);
 
-        s3Client.putObject(
-                PutObjectRequest.builder()
-                        .bucket(bucketName)
-                        .key(key)
-                        .contentType("application/json")
-                        .build(),
-                software.amazon.awssdk.core.sync.RequestBody.fromBytes(jsonBytes));
+        s3RetryExecutor.execute(
+                () -> s3Client.putObject(
+                        PutObjectRequest.builder()
+                                .bucket(bucketName)
+                                .key(key)
+                                .contentType("application/json")
+                                .build(),
+                        RequestBody.fromBytes(jsonBytes)),
+                "S3-PutObject-" + key);
+
         return nextVersion;
     }
 
@@ -121,25 +148,28 @@ public class CatalogService {
      * Part of the WAP (Write-Ahead-Parquet) pattern.
      *
      * @param tableName the name of the table
-     * @param txnId the transaction ID (e.g., uuid)
-     * @param metadata the metadata to stage
-     * @param version the intended version number
+     * @param txnId     the transaction ID (e.g., uuid)
+     * @param metadata  the metadata to stage
+     * @param version   the intended version number
      * @throws Exception if an error occurs while staging
      */
-    public void stageTableMetadata(String tableName, String txnId, TableMetadata metadata, int version) throws Exception {
+    public void stageTableMetadata(String tableName, String txnId, TableMetadata metadata, int version)
+            throws Exception {
         String stagingKey = String.format("tables/%s/_staging/txn_%s/v%d.json",
-            tableName.toLowerCase(), txnId, version);
+                tableName.toLowerCase(), txnId, version);
 
         String jsonContent = metadata.toJson();
         byte[] jsonBytes = jsonContent.getBytes(StandardCharsets.UTF_8);
 
-        s3Client.putObject(
-                PutObjectRequest.builder()
-                        .bucket(bucketName)
-                        .key(stagingKey)
-                        .contentType("application/json")
-                        .build(),
-                software.amazon.awssdk.core.sync.RequestBody.fromBytes(jsonBytes));
+        s3RetryExecutor.execute(
+                () -> s3Client.putObject(
+                        PutObjectRequest.builder()
+                                .bucket(bucketName)
+                                .key(stagingKey)
+                                .contentType("application/json")
+                                .build(),
+                        RequestBody.fromBytes(jsonBytes)),
+                "S3-PutObject-" + stagingKey);
     }
 
     /**
@@ -147,23 +177,27 @@ public class CatalogService {
      */
     public void cleanupStaging(String tableName, String txnId) {
         String prefix = String.format("tables/%s/_staging/txn_%s/",
-            tableName.toLowerCase(), txnId);
+                tableName.toLowerCase(), txnId);
         try {
-            ListObjectsV2Response listRes = s3Client.listObjectsV2(
-                ListObjectsV2Request.builder().bucket(bucketName).prefix(prefix).build());
+            ListObjectsV2Response listRes = s3RetryExecutor.execute(
+                    () -> s3Client.listObjectsV2(
+                            ListObjectsV2Request.builder().bucket(bucketName).prefix(prefix).build()),
+                    "S3-ListObjectsV2-" + prefix);
 
             if (listRes.contents() != null && !listRes.contents().isEmpty()) {
-                java.util.List<software.amazon.awssdk.services.s3.model.ObjectIdentifier> ids =
-                    listRes.contents().stream()
-                        .map(obj -> software.amazon.awssdk.services.s3.model.ObjectIdentifier.builder().key(obj.key()).build())
+                java.util.List<ObjectIdentifier> ids = listRes.contents().stream()
+                        .map(obj -> ObjectIdentifier.builder().key(obj.key()).build())
                         .collect(java.util.stream.Collectors.toList());
 
-                s3Client.deleteObjects(software.amazon.awssdk.services.s3.model.DeleteObjectsRequest.builder()
-                        .bucket(bucketName)
-                        .delete(software.amazon.awssdk.services.s3.model.Delete.builder().objects(ids).build())
-                        .build());
+                s3RetryExecutor.execute(
+                        () -> s3Client.deleteObjects(DeleteObjectsRequest.builder()
+                                .bucket(bucketName)
+                                .delete(Delete.builder().objects(ids).build())
+                                .build()),
+                        "S3-DeleteObjects-" + prefix);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -172,15 +206,15 @@ public class CatalogService {
     public int discoverLatestVersion(String tableName) {
         String metadataPrefix = buildMetadataPrefix(tableName) + "/";
         try {
-            software.amazon.awssdk.services.s3.model.ListObjectsV2Response response = s3Client.listObjectsV2(
-                    software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+            ListObjectsV2Response response = s3RetryExecutor.execute(
+                    () -> s3Client.listObjectsV2(ListObjectsV2Request.builder()
                             .bucket(bucketName)
                             .prefix(metadataPrefix)
-                            .build()
-            );
+                            .build()),
+                    "S3-ListObjectsV2-" + metadataPrefix);
 
             int maxVersion = 0; // Default to 0 if no metadata exists yet
-            for (software.amazon.awssdk.services.s3.model.S3Object obj : response.contents()) {
+            for (S3Object obj : response.contents()) {
                 String key = obj.key();
                 // Matches keys like warehouse/tables/orders/metadata/v1.json
                 if (key.matches(".*/v\\d+\\.json$")) {
@@ -191,7 +225,8 @@ public class CatalogService {
                         if (ver > maxVersion) {
                             maxVersion = ver;
                         }
-                    } catch (NumberFormatException ignored) {}
+                    } catch (NumberFormatException ignored) {
+                    }
                 }
             }
             return maxVersion;

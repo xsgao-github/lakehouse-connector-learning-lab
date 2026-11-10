@@ -10,14 +10,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 import xsgao.lakehouseconnector.utils.S3ClientFactory;
 import xsgao.lakehouseconnector.utils.S3ClientUtils;
 import static xsgao.lakehouseconnector.utils.S3ClientUtils.BUCKET_NAME;
@@ -50,19 +59,18 @@ public class CatalogServiceTest {
         assertFalse(catalogService.isTableExists(tableName));
 
         // --- STEP 2: Upload Dummy Physical Data Files to S3 First ---
-        // Simulating the writer creating physical data files before registering them in metadata
+        // Simulating the writer creating physical data files before registering them in
+        // metadata
         String pathV1 = "tables/" + tableName + "/data/part-001.parquet";
         String pathV2 = "tables/" + tableName + "/data/part-002.parquet";
 
         s3Client.putObject(
-            PutObjectRequest.builder().bucket(BUCKET_NAME).key(pathV1).build(),
-            RequestBody.fromBytes("mock-parquet-data-v1".getBytes(StandardCharsets.UTF_8))
-        );
+                PutObjectRequest.builder().bucket(BUCKET_NAME).key(pathV1).build(),
+                RequestBody.fromBytes("mock-parquet-data-v1".getBytes(StandardCharsets.UTF_8)));
 
         s3Client.putObject(
-            PutObjectRequest.builder().bucket(BUCKET_NAME).key(pathV2).build(),
-            RequestBody.fromBytes("mock-parquet-data-v2".getBytes(StandardCharsets.UTF_8))
-        );
+                PutObjectRequest.builder().bucket(BUCKET_NAME).key(pathV2).build(),
+                RequestBody.fromBytes("mock-parquet-data-v2".getBytes(StandardCharsets.UTF_8)));
 
         // --- STEP 3: Build & Save v1.0 Metadata ---
         Field orderId = new Field(1, "order_id", "long", true);
@@ -78,8 +86,7 @@ public class CatalogServiceTest {
                 "s3://" + BUCKET_NAME + "/tables/" + tableName,
                 v1Schema,
                 (long) 101,
-                List.of(snapshotV1)
-        );
+                List.of(snapshotV1));
 
         int savedVersion1 = catalogService.saveTableMetadata(tableName, v1Metadata);
         assertEquals(1, savedVersion1, "First save should commit as v1.json");
@@ -94,8 +101,7 @@ public class CatalogServiceTest {
                 102,
                 System.currentTimeMillis() + 1000,
                 (long) 101,
-                List.of(fileV2)
-        );
+                List.of(fileV2));
 
         TableMetadata v2Metadata = new TableMetadata(
                 1,
@@ -103,8 +109,7 @@ public class CatalogServiceTest {
                 "s3://" + BUCKET_NAME + "/tables/" + tableName,
                 v2Schema,
                 (long) 102,
-                List.of(snapshotV1, snapshotV2)
-        );
+                List.of(snapshotV1, snapshotV2));
 
         int savedVersion2 = catalogService.saveTableMetadata(tableName, v2Metadata);
         assertEquals(2, savedVersion2, "Second save should commit as v2.json");
@@ -116,17 +121,17 @@ public class CatalogServiceTest {
         assertEquals(3, latestMetadata.getSchema().getFields().size());
         assertEquals((long) 102, latestMetadata.getCurrentSnapshotId());
 
-        // THE READER FLOW: Traverse metadata to find active files, then read them from S3
+        // THE READER FLOW: Traverse metadata to find active files, then read them from
+        // S3
         for (Snapshot snapshot : latestMetadata.getSnapshots()) {
             for (DataFile dataFile : snapshot.getAddedFiles()) {
                 // Read physical data file using path extracted from metadata manifest
                 ResponseBytes<GetObjectResponse> dataContent = s3Client.getObjectAsBytes(
-                    software.amazon.awssdk.services.s3.model.GetObjectRequest.builder()
-                        .bucket(BUCKET_NAME)
-                        .key(dataFile.getFilePath())
-                        .build()
-                );
-                
+                        software.amazon.awssdk.services.s3.model.GetObjectRequest.builder()
+                                .bucket(BUCKET_NAME)
+                                .key(dataFile.getFilePath())
+                                .build());
+
                 assertNotNull(dataContent);
                 assertTrue(dataContent.asUtf8String().contains("mock-parquet-data"));
             }
@@ -144,5 +149,38 @@ public class CatalogServiceTest {
         assertEquals(1, v1Loaded.getSnapshots().get(0).getAddedFiles().size());
         String v1FilePath = v1Loaded.getSnapshots().get(0).getAddedFiles().get(0).getFilePath();
         assertEquals(pathV1, v1FilePath);
+    }
+
+    @Test
+    void testCatalogServiceRetrySuccessOnThirdAttempt() throws Exception {
+        // Arrange: Mock S3Client
+        S3Client mockS3 = mock(S3Client.class);
+        
+        // Instantiate CatalogService with the mock client and retries enabled
+        CatalogService mockCatalogService = new CatalogService(mockS3, BUCKET_NAME);
+
+        // Use a retryable S3 status code like 503 Slow Down
+        S3Exception transientError = (S3Exception) S3Exception.builder()
+                .statusCode(503)
+                .message("Slow Down")
+                .build();
+
+        ResponseBytes<GetObjectResponse> mockResponse = ResponseBytes.fromByteArray(
+            GetObjectResponse.builder().build(), 
+            "{\"schemaId\": 1, \"fields\": [], \"tableUuid\": \"test-uuid\", \"location\": \"s3://bucket/table\", \"currentSnapshotId\": 101, \"snapshots\": []}".getBytes()
+        );
+
+        // Simulate 503 error on the first two calls, success on the third
+        when(mockS3.getObject(any(GetObjectRequest.class), any(ResponseTransformer.class)))
+                .thenThrow(transientError)
+                .thenThrow(transientError)
+                .thenReturn(mockResponse);
+
+        // Act: Call the service method on the mock-backed service instance
+        TableMetadata metadata = mockCatalogService.loadTableMetadata("users", 1);
+
+        // Assert: Verify success and exact call count (2 failures + 1 success = 3 calls)
+        assertNotNull(metadata);
+        verify(mockS3, times(3)).getObject(any(GetObjectRequest.class), any(ResponseTransformer.class));
     }
 }
