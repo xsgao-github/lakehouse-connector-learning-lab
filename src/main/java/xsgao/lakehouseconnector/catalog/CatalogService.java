@@ -117,6 +117,56 @@ public class CatalogService {
     }
 
     /**
+     * Stages metadata in a temporary transaction folder.
+     * Part of the WAP (Write-Ahead-Parquet) pattern.
+     *
+     * @param tableName the name of the table
+     * @param txnId the transaction ID (e.g., uuid)
+     * @param metadata the metadata to stage
+     * @param version the intended version number
+     * @throws Exception if an error occurs while staging
+     */
+    public void stageTableMetadata(String tableName, String txnId, TableMetadata metadata, int version) throws Exception {
+        String stagingKey = String.format("tables/%s/_staging/txn_%s/v%d.json",
+            tableName.toLowerCase(), txnId, version);
+
+        String jsonContent = metadata.toJson();
+        byte[] jsonBytes = jsonContent.getBytes(StandardCharsets.UTF_8);
+
+        s3Client.putObject(
+                PutObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(stagingKey)
+                        .contentType("application/json")
+                        .build(),
+                software.amazon.awssdk.core.sync.RequestBody.fromBytes(jsonBytes));
+    }
+
+    /**
+     * Cleans up a transaction staging folder.
+     */
+    public void cleanupStaging(String tableName, String txnId) {
+        String prefix = String.format("tables/%s/_staging/txn_%s/",
+            tableName.toLowerCase(), txnId);
+        try {
+            ListObjectsV2Response listRes = s3Client.listObjectsV2(
+                ListObjectsV2Request.builder().bucket(bucketName).prefix(prefix).build());
+
+            if (listRes.contents() != null && !listRes.contents().isEmpty()) {
+                java.util.List<software.amazon.awssdk.services.s3.model.ObjectIdentifier> ids =
+                    listRes.contents().stream()
+                        .map(obj -> software.amazon.awssdk.services.s3.model.ObjectIdentifier.builder().key(obj.key()).build())
+                        .collect(java.util.stream.Collectors.toList());
+
+                s3Client.deleteObjects(software.amazon.awssdk.services.s3.model.DeleteObjectsRequest.builder()
+                        .bucket(bucketName)
+                        .delete(software.amazon.awssdk.services.s3.model.Delete.builder().objects(ids).build())
+                        .build());
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /**
      * Discovers the highest existing version number (vN.json) for a table in S3.
      */
     public int discoverLatestVersion(String tableName) {

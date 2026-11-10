@@ -22,16 +22,25 @@ public class DataFile {
     @JsonProperty("file-size-in-bytes")
     private long fileSizeInBytes;
 
+    /**
+     * Schema id of the schema the file was written with. Null on files written before
+     * schema history was tracked; readers then fall back to the current schema.
+     */
+    @JsonProperty("schema-id")
+    private Long schemaId;
+
     public DataFile() {
         this.filePath = null;
         this.recordCount = 0;
         this.fileSizeInBytes = 0;
+        this.schemaId = null;
     }
 
     public DataFile(String filePath, long recordCount, long fileSizeInBytes) {
         this.filePath = filePath;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
+        this.schemaId = null;
     }
 
     public static DataFile fromJson(String json) throws Exception {
@@ -68,12 +77,21 @@ public class DataFile {
         this.fileSizeInBytes = fileSizeInBytes;
     }
 
+    public Long getSchemaId() {
+        return schemaId;
+    }
+
+    public void setSchemaId(Long schemaId) {
+        this.schemaId = schemaId;
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder("DataFile{");
         sb.append("filePath='").append(filePath).append('\'');
         sb.append(", recordCount=").append(recordCount);
         sb.append(", fileSizeInBytes=").append(fileSizeInBytes);
+        sb.append(", schemaId=").append(schemaId);
         sb.append("}");
         return sb.toString();
     }
