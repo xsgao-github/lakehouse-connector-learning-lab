@@ -1,0 +1,45 @@
+# Agent Directives
+
+## Execution & Style
+- **Ultra-Concise**: No introductory text, post-task filler, or detailed monologues.
+- **Minimal Thinking**: Keep internal thoughts to 1 brief sentence before issuing tool calls.
+- **Direct Output**: Immediately execute tools or output final answers.
+
+## Terminal & Environment (Windows / PowerShell)
+- **PowerShell Syntax**: Use native cmdlets (`Get-ChildItem`), NEVER CMD flags (e.g., `dir /s` will fail).
+- **Single-Pass Discovery**: Never crawl folders step-by-step. Fetch relative file paths in one command (e.g., `Get-ChildItem -Recurse -Filter *.java -Name`).
+
+## Technical Guidelines
+- **Tool Priority**: Prefer native tools (`read_file`, `write_to_file`, `apply_diff`) over terminal commands.
+- **Code Style**: Match repo naming/formatting; preserve comments for S3/Lakehouse API calls.
+- Module Isolation: Module 00/01 code resides strictly in `xsgao.lakehouseconnector.catalog`. Module 02 code (OCC & WAP commits) resides strictly in `xsgao.lakehouseconnector.concurrency`.
+- No Code Duplication: Always import and reuse existing code.
+
+## Build & Test Commands
+- **Build Project:** `mvn clean compile`
+- **Run Tests:** `mvn test`
+- **Run Specific Test:** `mvn test -Dtest=TestClassName`
+
+## Object Store File Structure
+```plaintext
+warehouse/
+└── tables/
+    └── orders/
+        ├── metadata/
+        │   ├── v1.json
+        │   └── v2.json
+        ├── _staging/
+        │   └── txn_f47ac10b-58cc/
+        │       └── date=2026-11-04/
+        │           └── part-00001.parquet
+        └── data/
+            ├── date=2026-11-04/
+            │   └── part-00001.parquet
+            └── date=2026-11-05/
+                └── part-00002.parquet
+```
+
+## Custom Commands
+- When the user says "run doc", read `.cline/workflow/doc-change.md` and execute the steps.
+- When the user says "run style", read `.cline/workflow/review-style.md` and execute the steps.
+- When the user says "run tests", read `.cline/workflow/review-tests.md` and execute the steps.
