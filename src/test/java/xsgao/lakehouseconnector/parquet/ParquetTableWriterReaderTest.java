@@ -73,7 +73,7 @@ public class ParquetTableWriterReaderTest {
         }
 
         // 2. Read records back
-        try (ParquetTableReader reader = new ParquetTableReader(schema, parquetPath)) {
+        try (ParquetTableReader reader = new ParquetTableReader(schema, null, parquetPath)) {
             Map<String, Object> rec1 = reader.readNextRecord();
             assertNotNull(rec1);
             assertEquals(101, rec1.get("id"));
@@ -88,7 +88,7 @@ public class ParquetTableWriterReaderTest {
         }
 
         // 3. Validate Footer Statistics Fallback
-        try (ParquetTableReader reader = new ParquetTableReader(schema, parquetPath)) {
+        try (ParquetTableReader reader = new ParquetTableReader(schema, null, parquetPath)) {
             Map<String, ColumnStats> statsMap = reader.extractFooterStatistics(parquetPath);
             assertNotNull(statsMap);
             assertTrue(statsMap.containsKey("id"));
