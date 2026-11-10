@@ -1,0 +1,77 @@
+{
+  "format-version": 1,
+  "table-uuid": "c7324838-812d-4d7a-8f6b-73b9e4a2d810",
+  "location": "s3://warehouse/tables/orders",
+  "schema": {
+    "schema-id": 2,
+    "fields": [
+      {"id": 1, "name": "order_id", "type": "long", "required": true},
+      {"id": 2, "name": "total_amount", "type": "double", "required": false},
+      {"id": 3, "name": "dt", "type": "string", "required": true},
+      {"id": 4, "name": "region", "type": "string", "required": false}
+    ]
+  },
+  "schemas": [
+    {
+      "schema-id": 1,
+      "fields": [
+        {"id": 1, "name": "order_id", "type": "long", "required": true},
+        {"id": 2, "name": "amount", "type": "double", "required": false},
+        {"id": 3, "name": "dt", "type": "string", "required": true}
+      ]
+    },
+    {
+      "schema-id": 2,
+      "fields": [
+        {"id": 1, "name": "order_id", "type": "long", "required": true},
+        {"id": 2, "name": "total_amount", "type": "double", "required": false},
+        {"id": 3, "name": "dt", "type": "string", "required": true},
+        {"id": 4, "name": "region", "type": "string", "required": false}
+      ]
+    }
+  ],
+  "current-schema-id": 2,
+  "current-snapshot-id": 1002,
+  "snapshots": [
+    {
+      "snapshot-id": 1001,
+      "timestamp-ms": 1730640000000,
+      "schema-id": 1,
+      "removed-files": [],
+      "added-files": [
+        {
+          "file-path": "data/dt=2026-11-03/part-001.parquet",
+          "record-count": 1500,
+          "file-size-in-bytes": 45021,
+          "schema-id": 1,
+          "column-stats": {
+            "order_id": {"lower-bound": "1", "upper-bound": "1500", "null-count": 0},
+            "amount": {"lower-bound": "5.0", "upper-bound": "900.0", "null-count": 12},
+            "dt": {"lower-bound": "2026-11-03", "upper-bound": "2026-11-03", "null-count": 0}
+          }
+        }
+      ]
+    },
+    {
+      "snapshot-id": 1002,
+      "timestamp-ms": 1730726400000,
+      "parent-snapshot-id": 1001,
+      "schema-id": 2,
+      "removed-files": [],
+      "added-files": [
+        {
+          "file-path": "data/dt=2026-11-04/part-002.parquet",
+          "record-count": 800,
+          "file-size-in-bytes": 24310,
+          "schema-id": 2,
+          "column-stats": {
+            "order_id": {"lower-bound": "1501", "upper-bound": "2300", "null-count": 0},
+            "total_amount": {"lower-bound": "10.0", "upper-bound": "1200.0", "null-count": 4},
+            "dt": {"lower-bound": "2026-11-04", "upper-bound": "2026-11-04", "null-count": 0},
+            "region": {"lower-bound": "EU", "upper-bound": "US", "null-count": 25}
+          }
+        }
+      ]
+    }
+  ]
+}
