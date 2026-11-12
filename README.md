@@ -77,3 +77,4 @@ This project is organized as a series of modules. Each module introduces a new L
 - [x] **Module 8**: Robust Error Handling -> [docs/module-08-error-handling.md](docs/module-08-error-handling.md) (Handles transient network failures, stale conflicts, and bulletproof recovery)
 - [x] **Module 9**: Vectorized Batch Processing -> [docs/module-09-vectorize.md](docs/module-09-vectorize.md) (Processes data in columnar memory batches for high-throughput)
 - [x] **Module 10**: File Compaction & Small-File Maintenance -> [docs/module-10-compaction.md](docs/module-10-compaction.md) (Merges small files into optimized chunks using the reader/writer stack to eliminate metadata overhead)
+- [x] **Module 11**: Testcontainers Integration Test & GitHub Actions -> [docs/module-11-ci.md](docs/module-11-ci.md) (Runs a self-provisioned MinIO round trip in CI while the existing suite stays local)

@@ -2,9 +2,9 @@
 
 The diagrams below reflect the **current implementation**:
 
-- `executeScan()` plans splits, runs independent operator pipelines concurrently, and returns flattened `RecordBatch` results in input split order.
-- For aggregation, a final-mode `AggregationOperator` directly implements `Iterator<RecordBatch>` and reduces the partial batches.
-- `executePipeline()` drains one pre-assembled operator pipeline or combiner serially.
+- `QueryExecutor.execute()` loads metadata, plans splits, runs independent operator pipelines concurrently through `PipelineExecutor`, and returns flattened `RecordBatch` results in input split order.
+- `AggregationOperator` implements local, per-split aggregation; a cross-split final combine remains conceptual.
+- `PipelineExecutor` (package-private) drains each split's pre-assembled operator pipeline inside a worker task.
 
 ## 1. Metadata loading, pruning, and split execution
 
@@ -12,19 +12,19 @@ The diagrams below reflect the **current implementation**:
 sequenceDiagram
     autonumber
     actor Client
+    participant QE as QueryExecutor
     participant Planner as TableScanPlanner
     participant Catalog as CatalogService
-    participant Planner as SplitPlanner
-    participant Executor as OperatorPipelineExecutor
+    participant Split as SplitPlanner
+    participant Executor as PipelineExecutor
     participant W1 as Worker 1
     participant WN as Worker N
-    participant Combiner as AggregationOperator (FINAL mode)
     participant S3 as S3 / MinIO
 
-    Client->>Planner: executeScan(table, filter, predicates, pipelineFactory)
-    Planner->>Planner: planScan(...)
+    Client->>QE: execute(table, filter, predicates, readerFactory)
 
-    Note over Planner,S3: Control plane: discover and load table metadata
+    Note over QE,S3: Control plane: discover and load table metadata
+    QE->>Planner: loadTableMetadata(table)
     Planner->>Catalog: loadTableMetadata(table)
     Catalog->>Catalog: discoverLatestVersion(table)
     Catalog->>S3: LIST tables/{table}/metadata/
@@ -34,37 +34,40 @@ sequenceDiagram
     S3-->>Catalog: metadata JSON
     Catalog->>Catalog: TableMetadata.fromJson(...)
     Catalog-->>Planner: TableMetadata
+    Planner-->>QE: TableMetadata
 
-    Note over Planner,Planner: Planning uses metadata only, so no Parquet data is read
-    Planner->>Planner: planSplits(metadata, partitionFilter, predicates)
-    Planner->>Planner: find Snapshot where snapshotId = currentSnapshotId
+    Note over QE,Split: Planning uses metadata only, so no Parquet data is read
+    QE->>Planner: planSplits(metadata, partitionFilter, predicates)
+    Planner->>Split: planSplits(metadata, partitionFilter, predicates)
+    Split->>Split: find Snapshot where snapshotId = currentSnapshotId
 
     loop Every DataFile in activeSnapshot.addedFiles
         alt partitionFilter is present and filePath does not contain it
-            Planner->>Planner: partition-prune file
+            Split->>Split: partition-prune file
         else column min/max statistics exclude a predicate
-            Planner->>Planner: statistics-prune file
+            Split->>Split: statistics-prune file
         else file survives pruning
-            Planner->>Planner: create TableSplit<br/>(filePath, recordCount, fileSize, schemaId)
+            Split->>Split: create TableSplit<br/>(filePath, recordCount, fileSize, schemaId)
         end
     end
 
-    Planner-->>Planner: List of surviving TableSplits
+    Split-->>Planner: List of surviving TableSplits
+    Planner-->>QE: List of surviving TableSplits
 
-    Note over Planner,Combiner: Data plane: execute one independent operator pipeline per split
-    Planner->>Executor: execute(splits, pipelineFactory)
+    Note over QE,Executor: Data plane: execute one independent operator pipeline per split
+    QE->>Executor: execute(splits, split -> new TableScanOperator(readerFactory.apply(split)))
     Executor->>Executor: create fixed thread pool<br/>size = min(splitCount, maxThreads)
 
     par Split 1
         Executor->>W1: pipelineFactory.apply(split1)
-        W1->>W1: construct RowReader and operator chain
+        W1->>W1: construct RowReader and TableScanOperator
         W1->>S3: read projected Parquet data for split1
         S3-->>W1: column data
         W1->>W1: drain pipeline into RecordBatches
         W1-->>Executor: split1 result batches
     and Split N
         Executor->>WN: pipelineFactory.apply(splitN)
-        WN->>WN: construct RowReader and operator chain
+        WN->>WN: construct RowReader and TableScanOperator
         WN->>S3: read projected Parquet data for splitN
         S3-->>WN: column data
         WN->>WN: drain pipeline into RecordBatches
@@ -72,24 +75,16 @@ sequenceDiagram
     end
 
     Executor->>Executor: Future.get() in input split order<br/>flatten per-split batches
-    Executor-->>Planner: ordered List of RecordBatches
+    Executor-->>QE: ordered List of RecordBatches
 
-    opt Aggregation pipelines
-        Planner->>Combiner: new AggregationOperator(partialBatches.iterator(), groupByKeys, finalAggregations, FINAL)
-        Planner->>Planner: executePipeline(combiner)
-        Planner->>Combiner: hasNext() / next()
-        Combiner->>Combiner: final grouped reduction of partial aggregates
-        Combiner-->>Planner: final RecordBatch
-    end
-
-    Planner-->>Client: final query results
+    QE-->>Client: List of RecordBatches
 ```
 
 **Pruning order:** active snapshot → partition-path filter → column min/max statistics → `TableSplit`.
 
 For time travel, `planTimeTravelScan()` loads the requested `vX.json` directly, then performs the same planning and pruning. It returns splits without executing them.
 
-Each split constructs its own reader and operator chain inside a worker task. The executor directly flattens ordinary results. For aggregation, partial batches are passed to a final-mode `AggregationOperator` for grouped reduction.
+Each split constructs its own reader and `TableScanOperator` inside a worker task. `QueryExecutor.execute` performs no filtering or aggregation: it only materializes scan batches, and `PipelineExecutor` flattens them directly.
 
 ## 2. Real Parquet reads through the operator pipeline
 
@@ -98,6 +93,7 @@ sequenceDiagram
     autonumber
     actor Client
     participant Planner as TableScanPlanner
+    participant Exec as PipelineExecutor
     participant Ops as FilterOperator /<br/>AggregationOperator
     participant Scan as TableScanOperator
     participant Parquet as ParquetTableReader<br/>(implements RowReader)
@@ -114,19 +110,19 @@ sequenceDiagram
     S3-->>Parquet: footer and physical file schema
     Parquet->>Parquet: derive requested schema<br/>containing projected columns only
     Parquet->>Parquet: configure ParquetReader projection
-    Client->>Scan: new TableScanOperator(rowReader, projectedFields)
+    Client->>Scan: new TableScanOperator(rowReader)
 
     opt Row filtering and/or aggregation
         Client->>Ops: wrap scan with FilterOperator<br/>and/or AggregationOperator
     end
 
-    Client->>Planner: executePipeline(operatorPipeline)
+    Client->>Exec: execute(splits, pipelineFactory)
 
     loop Until the pipeline is exhausted
-        Planner->>Ops: hasNext() / next()
+        Exec->>Ops: hasNext() / next()
         Ops->>Scan: pull upstream RecordBatch
 
-        Scan->>Scan: create RecordBatch for projected fields
+        Scan->>Scan: create RecordBatch from reader.getFields()
 
         loop Up to 1,000 rows or EOF
             Scan->>Parquet: readNextRecord()
@@ -147,18 +143,18 @@ sequenceDiagram
             Ops->>Ops: consume upstream batches<br/>group rows and calculate<br/>SUM / COUNT / MIN / MAX
         end
 
-        Ops-->>Planner: result RecordBatch
-        Planner->>Planner: append batch to results
+        Ops-->>Exec: result RecordBatch
+        Exec->>Exec: append batch to results
     end
 
     Scan->>Parquet: close RowReader at EOF
-    Planner-->>Client: List of RecordBatches
+    Exec-->>Client: List of RecordBatches
 ```
 
 The pull-based operator call flow is:
 
 ```text
-TableScanPlanner.executePipeline()
+PipelineExecutor.execute() (per split)
     → FilterOperator / AggregationOperator
     → TableScanOperator
     → ParquetTableReader (RowReader)
@@ -259,10 +255,11 @@ sequenceDiagram
 | Object | Responsibility |
 |---|---|
 | `CatalogService` | Discovers, reads, and writes versioned `vN.json` metadata. |
-| `TableScanPlanner` | Orchestrates metadata loading, split planning, parallel scan execution, and pipeline consumption. |
+| `TableScanPlanner` | Orchestrates metadata loading and split planning; it never reads data files. |
+| `QueryExecutor` | Caller entry point: loads metadata once, plans splits, and delegates per-split execution to `PipelineExecutor`. |
 | `SplitPlanner` | Resolves the active snapshot and converts surviving `DataFile` entries into `TableSplit` objects. |
-| `OperatorPipelineExecutor` | Constructs and drains independent per-split pipelines concurrently, flattening batches in input split order. |
-| `AggregationOperator` | Implements `Iterator<RecordBatch>`; `FINAL` mode merges partial aggregates across splits. |
+| `PipelineExecutor` | Package-private behind `QueryExecutor`; constructs and drains independent per-split pipelines concurrently, flattening batches in input split order. |
+| `AggregationOperator` | Implements `Iterator<RecordBatch>`; computes per-split partial aggregates. Cross-split final reduction is conceptual. |
 | `RowReader` | Format-independent contract for reading one decoded record at a time. |
 | `TableScanOperator` | Converts rows from an injected `RowReader` into `RecordBatch` objects. |
 | `ParquetTableWriter` | Physically writes Parquet records and footers. |
@@ -282,4 +279,4 @@ vN.json → active Snapshot → DataFiles → pruning → TableSplits
        → RecordBatches
 ```
 
-Relevant implementations: `TableScanPlanner.java:46`, `SplitPlanner.java:24`, `OperatorPipelineExecutor.java:20`, `RowReader.java:12`, `TableScanOperator.java:10`, `AggregationOperator.java:14`, `TableWriterService.java:29`, and `OCCCommitHandler.java:33`.
+Relevant implementations: `QueryExecutor.java:46`, `PipelineExecutor.java:41`, `TableScanPlanner.java:33`, `SplitPlanner.java:24`, `RowReader.java:12`, `TableScanOperator.java:10`, `AggregationOperator.java:22`, `TableWriterService.java:29`, and `OCCCommitHandler.java:33`.
