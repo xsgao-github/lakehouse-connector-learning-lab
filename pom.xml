@@ -19,6 +19,7 @@
         <assertj.version>3.24.2</assertj.version>
         <parquet.version>1.13.1</parquet.version>
         <hadoop.version>3.3.6</hadoop.version>
+        <arrow.version>15.0.0</arrow.version>
     </properties>
 
     <dependencies>
@@ -69,9 +70,21 @@
             </exclusions>
         </dependency>
         <dependency>
-        <groupId>org.apache.hadoop</groupId>
+            <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-aws</artifactId>
             <version>${hadoop.version}</version>
+        </dependency>
+
+        <!-- Apache Arrow Off-Heap Vectorized Memory & Containers -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-netty</artifactId>
+            <version>${arrow.version}</version>
         </dependency>
 
         <!-- Testing -->
@@ -117,7 +130,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.1.2</version>
                 <configuration>
-                    <argLine>-Djdk.security.allowNonstandardSubjectAccess=true</argLine>
+                    <argLine>-Djdk.security.allowNonstandardSubjectAccess=true --add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED</argLine>
                 </configuration>
             </plugin>
         </plugins>
